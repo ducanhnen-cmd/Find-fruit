@@ -1,0 +1,348 @@
+local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/liebertsx/Tora-Library/main/src/librarynew",true))()
+local tab = library:CreateWindow("NducHub - One Tap Hub")
+
+-- ## SERVICES ##
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local Camera = Workspace.CurrentCamera
+
+local LocalPlayer = Players.LocalPlayer
+
+-- ## VARIABLES ##
+local AimbotEnabled = false
+local AimbotTarget = nil
+local AimbotKey = Enum.KeyCode.Q
+local AimbotKeyHold = false
+
+-- Cấu hình
+local FOV_RADIUS = 150
+local SMOOTHING = 1          -- 1 = ghim đầu 100%
+local FOV_VISIBLE = true
+local FOV_COLOR = Color3.fromRGB(255, 255, 255)
+
+local ESPEnabled = false
+local ESPObjects = {}
+
+-- Tạo vòng tròn FOV
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible = false
+FOVCircle.Color = FOV_COLOR
+FOVCircle.Thickness = 1.5
+FOVCircle.NumSides = 64
+FOVCircle.Radius = FOV_RADIUS
+FOVCircle.Filled = false
+
+-- ## AIMBOT FUNCTIONS ##
+local function GetClosestPlayerToCursor()
+    local closestPlayer = nil
+    local shortestDistance = FOV_RADIUS
+    
+    local mousePos = UserInputService:GetMouseLocation()
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            local head = player.Character:FindFirstChild("Head")
+            if head then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    local distanceFromCursor = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                    if distanceFromCursor < shortestDistance then
+                        shortestDistance = distanceFromCursor
+                        closestPlayer = player
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestPlayer
+end
+
+local function AimbotLoop()
+    if AimbotEnabled then
+        AimbotTarget = GetClosestPlayerToCursor()
+        if AimbotTarget and AimbotTarget.Character and AimbotTarget.Character:FindFirstChild("Head") then
+            -- Ghim đầu 100% (Smoothing = 1)
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, AimbotTarget.Character.Head.Position)
+        end
+    else
+        AimbotTarget = nil
+    end
+end
+
+-- ## ESP FUNCTIONS ##
+local function CreateESP(player)
+    if player == LocalPlayer then return end
+    
+    local function setupESP(character)
+        if not character then return end
+        
+        -- Xóa ESP cũ nếu có
+        if ESPObjects[player] then
+            for _, obj in pairs(ESPObjects[player]) do
+                if obj then obj:Destroy() end
+            end
+        end
+        
+        ESPObjects[player] = {}
+        
+        -- Highlight toàn thân màu xanh lá, nhìn xuyên tường
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "PlayerESP"
+        highlight.FillColor = Color3.fromRGB(0, 255, 0)        -- Xanh lá
+        highlight.OutlineColor = Color3.fromRGB(0, 200, 0)    -- Viền xanh đậm
+        highlight.FillTransparency = 0.3                       -- Hơi trong suốt
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop  -- Luôn hiện xuyên tường
+        highlight.Adornee = character
+        highlight.Parent = character
+        table.insert(ESPObjects[player], highlight)
+        
+        -- Khi nhân vật bị xóa thì dọn ESP
+        character.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                if ESPObjects[player] then
+                    for _, obj in pairs(ESPObjects[player]) do
+                        if obj then obj:Destroy() end
+                    end
+                    ESPObjects[player] = nil
+                end
+            end
+        end)
+    end
+    
+    if player.Character then
+        setupESP(player.Character)
+    end
+    
+    player.CharacterAdded:Connect(function(character)
+        if ESPEnabled then
+            setupESP(character)
+        end
+    end)
+end
+
+local function ToggleESP(state)
+    ESPEnabled = state
+    if ESPEnabled then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                CreateESP(player)
+            end
+        end
+    else
+        for player, objects in pairs(ESPObjects) do
+            for _, obj in pairs(objects) do
+                if obj then obj:Destroy() end
+            end
+        end
+        ESPObjects = {}
+    end
+end
+
+-- ## UPDATE FOV CIRCLE ##
+local function UpdateFOVCircle()
+    if FOV_VISIBLE and AimbotEnabled then
+        FOVCircle.Visible = true
+        FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        FOVCircle.Radius = FOV_RADIUS
+    else
+        FOVCircle.Visible = false
+    end
+end
+
+-- ## PLAYER CONNECTIONS ##
+Players.PlayerAdded:Connect(function(player)
+    if ESPEnabled then
+        CreateESP(player)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    if ESPObjects[player] then
+        for _, obj in pairs(ESPObjects[player]) do
+            if obj then obj:Destroy() end
+        end
+        ESPObjects[player] = nil
+    end
+    if AimbotTarget == player then
+        AimbotTarget = nil
+    end
+end)
+
+-- ## AIMBOT KEY HANDLER ##
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == AimbotKey then
+        if AimbotKeyHold then
+            AimbotEnabled = true
+        else
+            AimbotEnabled = not AimbotEnabled
+        end
+        UpdateFOVCircle()
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == AimbotKey and AimbotKeyHold then
+        AimbotEnabled = false
+        AimbotTarget = nil
+        UpdateFOVCircle()
+    end
+end)
+
+-- ## RUN SERVICE LOOP ##
+RunService.RenderStepped:Connect(function()
+    UpdateFOVCircle()
+    if AimbotEnabled then
+        AimbotLoop()
+    end
+end)
+
+-- ## UI ##
+local aimbotFolder = tab:AddFolder("AimBot")
+
+aimbotFolder:AddToggle({
+    text = "Enable AimBot",
+    flag = "aimbot_toggle",
+    callback = function(v)
+        if not AimbotKeyHold then
+            AimbotEnabled = v
+        end
+        UpdateFOVCircle()
+    end
+})
+
+aimbotFolder:AddBind({
+    text = "AimBot Key",
+    key = "Q",
+    hold = false,
+    callback = function()
+        -- bind handler
+    end
+})
+
+aimbotFolder:AddToggle({
+    text = "Hold Key",
+    flag = "aimbot_hold",
+    callback = function(v)
+        AimbotKeyHold = v
+    end
+})
+
+aimbotFolder:AddSlider({
+    text = "FOV Radius",
+    min = 30,
+    max = 300,
+    dual = false,
+    type = "slider",
+    callback = function(v)
+        FOV_RADIUS = v
+    end
+})
+
+aimbotFolder:AddSlider({
+    text = "Smoothing",
+    min = 0.05,
+    max = 1,
+    dual = false,
+    type = "slider",
+    callback = function(v)
+        SMOOTHING = v
+    end
+})
+
+aimbotFolder:AddToggle({
+    text = "Show FOV Circle",
+    flag = "show_fov",
+    callback = function(v)
+        FOV_VISIBLE = v
+        UpdateFOVCircle()
+    end
+})
+
+aimbotFolder:AddLabel({
+    text = "Press Q or toggle to aim",
+    type = "label"
+})
+
+local espFolder = tab:AddFolder("ESP Player")
+espFolder:AddToggle({
+    text = "Enable ESP",
+    flag = "esp_toggle",
+    callback = function(v)
+        ToggleESP(v)
+    end
+})
+
+espFolder:AddLabel({
+    text = "ESP: Green glow, see through walls",
+    type = "label"
+})
+
+-- Các thành phần UI gốc
+local folder = tab:AddFolder("Main")
+folder:AddButton({
+    text = "Click me",
+    flag = "button",
+    callback = function()
+        print("hello world")
+    end
+})
+
+folder:AddToggle({
+    text = "Toggle",
+    flag = "toggle",
+    callback = function(v)
+        print(v)
+    end
+})
+
+folder:AddLabel({
+    text = "This Is Sick!",
+    type = "label"
+})
+
+folder:AddSlider({
+    text = "Fov",
+    min = 70,
+    max = 170,
+    dual = true,
+    type = "slider",
+    callback = function(v)
+        print(v)
+    end
+})
+
+folder:AddColor({
+    text = "Color Picker",
+    flag = "color",
+    type = "color",
+    callback = function(v)
+        print(v)
+    end
+})
+
+folder:AddList({
+    text = "Color",
+    values = {"Red", "Green", "Blue"},
+    callback = function(value)
+        print("Selected color:", value)
+    end,
+    open = false,
+    flag = "color_option"
+})
+
+folder:AddBind({
+    text = "bind",
+    key = "X",
+    hold = false,
+    callback = function()
+    end
+})
+
+library:Close()
+library:Init()
