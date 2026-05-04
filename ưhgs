@@ -1,0 +1,233 @@
+local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/liebertsx/Tora-Library/main/src/librarynew",true))()
+local tab = library:CreateWindow("NducNo1")
+local folder = tab:AddFolder("Kill Aura")
+
+-- Kill Aura - Tấn công TẤT CẢ (Mob + NPC + Nguyên Liệu)
+local AttackRange = 800
+local AttackCooldown = 0.1  -- Mặc định 0.1s (tốc độ đánh nhanh nhất)
+local AttackHPPercent = 100
+local AttackMode = "Vector3"
+local FireAbilitiesEnabled = true
+local KillAuraEnabled = false
+local DamageMultiplier = 1
+
+-- Nút bật/tắt Kill Aura
+folder:AddToggle({
+    text = "Bật/Tắt Kill Aura",
+    flag = "killaura_toggle",
+    callback = function(v)
+        KillAuraEnabled = v
+        if v then
+            print("[Kill Aura] Đã BẬT")
+        else
+            print("[Kill Aura] Đã TẮT")
+        end
+    end
+})
+
+-- Slider chỉnh sức mạnh
+folder:AddSlider({
+    text = "Sức Mạnh",
+    min = 1,
+    max = 100,
+    dual = false,
+    type = "slider",
+    flag = "damage_slider",
+    callback = function(v)
+        DamageMultiplier = v
+        print("[Kill Aura] Sức mạnh: x" .. v)
+    end
+})
+
+-- Slider chỉnh tầm đánh
+folder:AddSlider({
+    text = "Tầm Đánh",
+    min = 100,
+    max = 2000,
+    dual = false,
+    type = "slider",
+    flag = "range_slider",
+    callback = function(v)
+        AttackRange = v
+        print("[Kill Aura] Tầm đánh: " .. v)
+    end
+})
+
+-- Slider chỉnh tốc độ đánh (mặc định 0.1s)
+folder:AddSlider({
+    text = "Tốc Độ Đánh",
+    min = 0.1,
+    max = 2,
+    dual = false,
+    type = "slider",
+    flag = "speed_slider",
+    callback = function(v)
+        AttackCooldown = v
+        print("[Kill Aura] Tốc độ đánh: " .. v .. "s")
+    end
+})
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local RS = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+-- Tìm TẤT CẢ remote
+local allRemotes = {}
+local hitRemotes = {}
+local abilityRemotes = {}
+
+local function findAllRemotes()
+    allRemotes = {}
+    hitRemotes = {}
+    abilityRemotes = {}
+    
+    print("[Kill Aura] Đang quét tất cả Remote...")
+    
+    for _, v in pairs(RS:GetDescendants()) do
+        if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
+            table.insert(allRemotes, v)
+            
+            local name = v.Name:lower()
+            local parentName = v.Parent and v.Parent.Name:lower() or ""
+            
+            if name:find("hit") or name:find("damage") or name:find("attack") or 
+               name:find("combat") or name:find("deal") or name:find("slash") or
+               name:find("punch") or name:find("shoot") or name:find("fire") or
+               name:find("click") or name:find("swing") or name:find("weapon") or
+               parentName:find("combat") or parentName:find("damage") or
+               parentName:find("attack") then
+                table.insert(hitRemotes, v)
+                print("[Kill Aura] Hit Remote: " .. v:GetFullName())
+            end
+            
+            if name:find("ability") or name:find("skill") or name:find("spell") or
+               name:find("special") or parentName:find("ability") or 
+               parentName:find("skill") then
+                table.insert(abilityRemotes, v)
+                print("[Kill Aura] Ability Remote: " .. v:GetFullName())
+            end
+        end
+    end
+    
+    print("[Kill Aura] Tổng: " .. #allRemotes .. " | Hit: " .. #hitRemotes .. " | Ability: " .. #abilityRemotes)
+    
+    if #hitRemotes == 0 then
+        print("[Kill Aura] Dùng tất cả remote để tấn công")
+        hitRemotes = allRemotes
+    end
+end
+
+findAllRemotes()
+
+-- Tìm tất cả mục tiêu
+local function findAllTargets()
+    local targets = {}
+    
+    -- Tìm trong thư mục phổ biến
+    local searchFolders = {
+        workspace:FindFirstChild("Mobs"),
+        workspace:FindFirstChild("NPCs"),
+        workspace:FindFirstChild("Enemies"),
+        workspace:FindFirstChild("Monsters"),
+        workspace:FindFirstChild("Resources"),
+        workspace:FindFirstChild("Nodes"),
+        workspace:FindFirstChild("Ores"),
+        workspace:FindFirstChild("Trees"),
+        workspace:FindFirstChild("Rocks"),
+        workspace:FindFirstChild("Grass"),
+        workspace:FindFirstChild("Farms"),
+        workspace:FindFirstChild("MobsFolder"),
+        workspace:FindFirstChild("EnemyFolder")
+    }
+    
+    for _, folder in pairs(searchFolders) do
+        if folder then
+            for _, obj in pairs(folder:GetChildren()) do
+                if obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") then
+                    table.insert(targets, obj)
+                end
+            end
+        end
+    end
+    
+    -- Nếu không tìm thấy, quét toàn bộ workspace
+    if #targets == 0 then
+        print("[Kill Aura] Quét toàn bộ workspace...")
+        for _, obj in pairs(workspace:GetChildren()) do
+            if obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") then
+                table.insert(targets, obj)
+            end
+        end
+    end
+    
+    return targets
+end
+
+local lastAttackTime = 0
+
+local function attackAllTargets()
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local targets = findAllTargets()
+    local attackCount = 0
+    
+    -- Tấn công tất cả mục tiêu trong tầm
+    for _, target in pairs(targets) do
+        if target and target.Parent then
+            local targetHrp = target:FindFirstChild("HumanoidRootPart")
+            if targetHrp then
+                local dist = (hrp.Position - targetHrp.Position).Magnitude
+                
+                if dist <= AttackRange then
+                    -- Thử tất cả các remote để tấn công
+                    for _, remote in pairs(hitRemotes) do
+                        pcall(function()
+                            -- Thử nhiều cách gửi khác nhau
+                            remote:FireServer(target)  -- Gửi nguyên target
+                            remote:FireServer(targetHrp.Position)  -- Gửi vị trí
+                            remote:FireServer(target, DamageMultiplier)  -- Gửi target + damage
+                            remote:FireServer(targetHrp.Position, DamageMultiplier)  -- Gửi vị trí + damage
+                        end)
+                    end
+                    
+                    -- Thử ability remotes
+                    for _, remote in pairs(abilityRemotes) do
+                        pcall(function()
+                            remote:FireServer()
+                            remote:FireServer(target)
+                            remote:FireServer(targetHrp.Position)
+                        end)
+                    end
+                    
+                    attackCount = attackCount + 1
+                end
+            end
+        end
+    end
+    
+    if attackCount > 0 then
+        print("[Kill Aura] Tấn công " .. attackCount .. " mục tiêu | Tốc độ: " .. AttackCooldown .. "s | Sức mạnh: x" .. DamageMultiplier)
+    end
+end
+
+-- Vòng lặp chính với tốc độ 0.1s
+RunService.Heartbeat:Connect(function()
+    if not KillAuraEnabled then return end
+    
+    local now = tick()
+    if now - lastAttackTime < AttackCooldown then return end
+    
+    lastAttackTime = now
+    attackAllTargets()
+end)
+
+print("[Kill Aura] Đã sẵn sàng! Tốc độ mặc định: 0.1s")
+print("[Kill Aura] Bật Kill Aura để bắt đầu tấn công!")
+
+library:Init()
