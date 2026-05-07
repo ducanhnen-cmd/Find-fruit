@@ -1,0 +1,346 @@
+local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/liebertsx/Tora-Library/main/src/librarynew",true))()
+local tab = library:CreateWindow("Nduc")
+
+-- ============================================
+-- SERVICES
+-- ============================================
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- ============================================
+-- TẠO REMOTE EVENTS
+-- ============================================
+local remoteFolder = ReplicatedStorage:FindFirstChild("NducEvents")
+if not remoteFolder then
+    remoteFolder = Instance.new("Folder")
+    remoteFolder.Name = "NducEvents"
+    remoteFolder.Parent = ReplicatedStorage
+end
+
+local DamageEvent = ReplicatedStorage.NducEvents:FindFirstChild("DamageEvent")
+if not DamageEvent then
+    DamageEvent = Instance.new("RemoteEvent")
+    DamageEvent.Name = "DamageEvent"
+    DamageEvent.Parent = remoteFolder
+end
+
+-- ============================================
+-- FOLDER: PLAYER (ESP)
+-- ============================================
+local playerFolder = tab:AddFolder("Player")
+
+-- ────────────────────────────────────────────────
+-- ESP PLAYER (Players + Bots) - Through Walls
+-- ────────────────────────────────────────────────
+local highlights = {}
+local espEnabled = false
+
+local function isTargetAlive(model)
+    return model and model:FindFirstChild("HumanoidRootPart")
+        and model:FindFirstChild("Humanoid")
+        and model.Humanoid.Health > 0
+end
+
+local function isRealPlayer(model)
+    return Players:GetPlayerFromCharacter(model) ~= nil
+end
+
+local allTargets = {}
+
+local function updateAllTargets()
+    allTargets = {}
+    
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+            table.insert(allTargets, plr.Character)
+        end
+    end
+    
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Model")
+            and obj:FindFirstChild("Humanoid")
+            and obj:FindFirstChild("HumanoidRootPart")
+            and not isRealPlayer(obj) then
+            
+            if obj.Name == "Astration"
+               or obj.Name:find("Astration")
+               or obj.Name:find("Bot")
+               or obj.Name:find("Dummy")
+               or obj.Name:find("NPC") then
+                table.insert(allTargets, obj)
+            end
+        end
+    end
+end
+
+local function createESP(model)
+    if highlights[model] or not model or not model:FindFirstChild("HumanoidRootPart") then return end
+    
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "NducESP"
+    highlight.Adornee = model
+    highlight.FillColor = isRealPlayer(model) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(255, 50, 50)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.FillTransparency = 0.35
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = model
+    
+    highlights[model] = highlight
+end
+
+local function clearAllESP()
+    for _, hl in pairs(highlights) do
+        if hl and hl.Parent then hl:Destroy() end
+    end
+    highlights = {}
+end
+
+local function updateESP()
+    clearAllESP()
+    if not espEnabled then return end
+    
+    for _, model in ipairs(allTargets) do
+        if isTargetAlive(model) then
+            createESP(model)
+        end
+    end
+end
+
+local function setESP(enabled)
+    espEnabled = enabled
+    if enabled then
+        updateAllTargets()
+        updateESP()
+    else
+        clearAllESP()
+    end
+end
+
+spawn(function()
+    while task.wait(1.2) do
+        if espEnabled then
+            updateAllTargets()
+            updateESP()
+        end
+    end
+end)
+
+Workspace.ChildAdded:Connect(function(child)
+    if espEnabled and child:IsA("Model") and child:FindFirstChild("Humanoid") then
+        task.wait(0.4)
+        updateAllTargets()
+        updateESP()
+    end
+end)
+
+Workspace.ChildRemoved:Connect(function()
+    if espEnabled then
+        updateAllTargets()
+        updateESP()
+    end
+end)
+
+Players.PlayerAdded:Connect(function()
+    if espEnabled then
+        updateAllTargets()
+        updateESP()
+    end
+end)
+
+Players.PlayerRemoving:Connect(function()
+    if espEnabled then
+        updateAllTargets()
+        updateESP()
+    end
+end)
+
+playerFolder:AddToggle({
+    text = "ESP Player",
+    flag = "esp_player",
+    callback = function(v)
+        setESP(v)
+    end
+})
+
+-- ============================================
+-- FOLDER: HITBOX
+-- ============================================
+local hitboxFolder = tab:AddFolder("Hitbox")
+
+-- ────────────────────────────────────────────────
+-- HITBOX SYSTEM - XUYÊN VẬT CẢN
+-- ────────────────────────────────────────────────
+local hitboxEnabled = false
+local hitboxRange = 5
+local hitboxDamage = 10
+local hitboxKnockback = 10
+local hitboxPart = nil
+local updateConnection = nil
+local damageConnection = nil
+
+local BASE_SIZE = 4
+local MAX_RANGE = 50
+
+-- Tạo hitbox part
+local function createHitboxPart()
+    destroyHitboxPart()
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    local size = BASE_SIZE * (hitboxRange / 5)
+    
+    hitboxPart = Instance.new("Part")
+    hitboxPart.Name = "NducHitbox_" .. LocalPlayer.Name
+    hitboxPart.Size = Vector3.new(size, size, size)
+    hitboxPart.Shape = Enum.PartType.Ball
+    hitboxPart.Transparency = 0.5
+    hitboxPart.BrickColor = BrickColor.new("Bright red")
+    hitboxPart.Material = Enum.Material.Neon
+    hitboxPart.CanCollide = false
+    hitboxPart.Anchored = true
+    hitboxPart.CFrame = rootPart.CFrame
+    hitboxPart.Parent = workspace
+    
+    -- Cập nhật vị trí hitbox
+    updateConnection = RunService.Heartbeat:Connect(function()
+        if not hitboxPart or not hitboxPart.Parent then return end
+        
+        local char = LocalPlayer.Character
+        if not char then return end
+        
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        
+        hitboxPart.CFrame = root.CFrame
+    end)
+    
+    -- Gây damage liên tục - XUYÊN VẬT CẢN
+    damageConnection = RunService.Heartbeat:Connect(function()
+        if not hitboxPart or not hitboxPart.Parent then return end
+        
+        for _, targetPlayer in ipairs(Players:GetPlayers()) do
+            if targetPlayer == LocalPlayer then continue end
+            
+            local targetChar = targetPlayer.Character
+            if not targetChar then continue end
+            
+            local targetHumanoid = targetChar:FindFirstChild("Humanoid")
+            if not targetHumanoid or targetHumanoid.Health <= 0 then continue end
+            
+            local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+            if not targetRoot then continue end
+            
+            -- Chỉ kiểm tra khoảng cách, BỎ QUA Raycast (xuyên tường)
+            local distance = (targetRoot.Position - hitboxPart.Position).Magnitude
+            local hitboxRadius = hitboxPart.Size.X / 2
+            
+            if distance <= hitboxRadius then
+                -- Gây damage + knockback trực tiếp qua RemoteEvent
+                local knockbackForce = Vector3.zero
+                if hitboxKnockback > 0 then
+                    local direction = (targetRoot.Position - hitboxPart.Position).Unit
+                    knockbackForce = direction * hitboxKnockback
+                end
+                
+                DamageEvent:FireServer(targetPlayer, hitboxDamage, knockbackForce)
+                
+                -- Hiệu ứng hit
+                local hitEffect = Instance.new("Part")
+                hitEffect.Size = Vector3.new(0.5, 0.5, 0.5)
+                hitEffect.Shape = Enum.PartType.Ball
+                hitEffect.Transparency = 0.7
+                hitEffect.BrickColor = BrickColor.new("Bright yellow")
+                hitEffect.Material = Enum.Material.Neon
+                hitEffect.Anchored = true
+                hitEffect.CanCollide = false
+                hitEffect.CFrame = targetRoot.CFrame
+                hitEffect.Parent = workspace
+                Debris:AddItem(hitEffect, 0.3)
+            end
+        end
+    end)
+end
+
+-- Xóa hitbox part
+local function destroyHitboxPart()
+    if hitboxPart then
+        hitboxPart:Destroy()
+        hitboxPart = nil
+    end
+    
+    if updateConnection then
+        updateConnection:Disconnect()
+        updateConnection = nil
+    end
+    
+    if damageConnection then
+        damageConnection:Disconnect()
+        damageConnection = nil
+    end
+end
+
+-- Cập nhật kích thước hitbox
+local function updateHitboxSize()
+    if not hitboxPart then return end
+    
+    local size = BASE_SIZE * (hitboxRange / 5)
+    hitboxPart.Size = Vector3.new(size, size, size)
+end
+
+-- Bật/tắt hitbox
+local function setHitbox(enabled)
+    hitboxEnabled = enabled
+    
+    if enabled then
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            createHitboxPart()
+        end
+    else
+        destroyHitboxPart()
+    end
+end
+
+-- Khi respawn
+LocalPlayer.CharacterAdded:Connect(function(character)
+    if hitboxEnabled then
+        task.wait(0.3)
+        createHitboxPart()
+    end
+end)
+
+-- Toggle Hitbox trong UI
+hitboxFolder:AddToggle({
+    text = "Hitbox",
+    flag = "hitbox_toggle",
+    callback = function(v)
+        setHitbox(v)
+    end
+})
+
+-- Slider chỉnh Range Hitbox
+hitboxFolder:AddSlider({
+    text = "Hitbox Range",
+    min = 1,
+    max = 50,
+    dual = false,
+    type = "slider",
+    callback = function(v)
+        hitboxRange = v
+        updateHitboxSize()
+    end
+})
+
+print("✅ Nduc Hub Ready!")
+
+library:Close()
+library:Init()
